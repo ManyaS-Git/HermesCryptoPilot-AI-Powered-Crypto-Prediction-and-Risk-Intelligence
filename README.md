@@ -65,21 +65,35 @@ app/
     LOG_LEVEL=INFO
     ```
 
-### Usage
+### Usage (Local Testing)
 
-**Running the CLI (Testing the workflow end-to-end):**
+The project includes a seamless **Mock Mode** enabled by default in `app/config/settings.py`. This means you can run the entire pipeline immediately without needing to configure any API keys!
 
-```bash
-python main.py
-```
-*This will execute the supervisor workflow for BTC and ETH concurrently and log the JSON telemetry to the console.*
-
-**Running the REST API (FastAPI Server):**
+**1. Run the Backend API Server:**
 
 ```bash
 python main.py api
 ```
-*The API will start on `http://0.0.0.0:8000`. You can test triggering workflows via the `/trigger-workflow` endpoint.*
+*The API will start on `http://0.0.0.0:8000`.*
+
+**2. Run the Frontend Dashboard:**
+
+Open a separate terminal, navigate to the `frontend` folder, and start the Next.js server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+*The interactive dashboard will be available at `http://localhost:3000`. Select an asset and click **"▶ Run Prediction"** to watch the simulated workflow generate technical probabilities, pull market odds, and calculate the Kelly position size.*
+
+**3. Running the CLI (Console Only):**
+
+```bash
+python main.py
+```
+*Executes the supervisor workflow for BTC and ETH concurrently and logs JSON telemetry to the console.*
 
 ## 🧪 Testing & Backtesting
 
