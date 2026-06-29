@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Application Profile: development, testing, production
     PROFILE: str = "development"
+    MOCK_MODE: bool = True
     
     # API Keys
     OPENROUTER_API_KEY: str = ""

@@ -17,6 +17,27 @@ class MarketDataService:
         symbol: e.g. 'BTCUSDT'
         interval: e.g. '1m', '5m'
         """
+        from app.config.settings import get_settings
+        settings = get_settings()
+        
+        if settings.MOCK_MODE:
+            logger.info(f"MOCK MODE: Returning fake OHLCV data for {symbol}")
+            import random
+            from datetime import timedelta
+            now = datetime.utcnow()
+            return [
+                OHLCV(
+                    asset=symbol,
+                    timestamp=now - timedelta(minutes=i*5),
+                    timeframe=interval,
+                    open=random.uniform(50000, 60000),
+                    high=random.uniform(60000, 61000),
+                    low=random.uniform(49000, 50000),
+                    close=random.uniform(50000, 60000),
+                    volume=random.uniform(10, 100)
+                ) for i in range(100)
+            ]
+            
         url = f"{self.base_url}/klines"
         params = {
             "symbol": symbol,
