@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List
 from datetime import datetime
+
 
 class OHLCV(BaseModel):
     asset: str
@@ -12,13 +13,15 @@ class OHLCV(BaseModel):
     close: float
     volume: float
 
+
 class MarketOdds(BaseModel):
     asset: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     source: str  # Polymarket, Kalshi
     implied_probability: float
     odds: float
-    
+
+
 class UnifiedMarketConsensus(BaseModel):
     asset: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)

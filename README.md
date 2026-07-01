@@ -1,109 +1,135 @@
-# Hermes Crypto Prediction Bot
+<div align="center">
+  <h1>Hermes Crypto Prediction Bot 🚀</h1>
+  <p>
+    <strong>A production-ready, agentic AI platform for cryptocurrency price prediction and risk management.</strong>
+  </p>
+  
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.11+-blue.svg" alt="Python Version" />
+    <img src="https://img.shields.io/badge/FastAPI-0.103.0-009688.svg" alt="FastAPI" />
+    <img src="https://img.shields.io/badge/Next.js-15.0.0-black.svg" alt="Next.js" />
+    <img src="https://img.shields.io/badge/React-19.0.0-61dafb.svg" alt="React" />
+    <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
+  </p>
+</div>
 
-A production-ready backend Python project leveraging the [Hermes Agents framework](https://github.com/nousresearch/hermes-agent) to orchestrate a suite of specialized AI agents for cryptocurrency market research, technical prediction, and risk management.
+---
 
-## 🌟 Key Features
+## 🌟 Overview
 
-*   **Hermes Agent Orchestration**: A central `SupervisorAgent` coordinates tasks across multiple specialized worker agents, using LLMs (via OpenRouter) to resolve conflicts and explain rationales.
-*   **Foundation Model Predictions**: Integrates the [Kronos](https://github.com/shiyu-coder/Kronos) model to analyze technical OHLCV data.
-*   **Signal Fusion**: Combines technical model probabilities with real-world market odds (from Kalshi and Polymarket) using a pluggable consensus strategy.
-*   **Kelly Sizing**: Computes precise Expected Value (EV) and applies Kelly criterion formulas for safe, mathematically-sound position recommendations.
-*   **Probability Calibration**: Uses techniques like Platt Scaling to prevent model overconfidence before risking capital.
-*   **Asynchronous & Telemetry**: Fully async pipeline powered by `asyncio` and `aiohttp`, with structured JSON telemetry logging.
+Hermes is an AI-orchestrated cryptocurrency trading prediction engine. It utilizes the [Hermes Agents Framework](https://github.com/nousresearch/hermes-agent) to orchestrate a "swarm" of highly specialized AI agents that collaborate to evaluate market opportunities. It fuses sophisticated quantitative modeling (using Foundation Models like Kronos) with real-world market intelligence, and calculates exact position sizing based on mathematically-proven risk paradigms (Kelly Criterion).
 
-## 🏗️ Architecture
+The platform is split into two robust components:
+1. **Python FastAPI Backend**: Orchestrates the multi-agent AI swarm, data fetching, prediction fusion, and risk logic asynchronously.
+2. **Next.js UI**: A dynamic, beautiful web dashboard displaying real-time predictions, agent status, portfolio health, and analytics.
 
-The system operates on a decentralized, supervisor-worker pattern:
+## 🏗️ AI Swarm Architecture
 
-1.  **Supervisor Agent**: Orchestrates workflows, handles LLM-based reasoning, and manages final reporting.
-2.  **Market Intelligence Agent**: Gathers and unifies odds from prediction markets (Kalshi, Polymarket).
-3.  **Market Data Agent**: Fetches historical multi-timeframe OHLCV data from exchanges (e.g., Binance).
-4.  **Prediction Agent**: Wraps the Kronos model pipeline (`FeaturePipeline -> WindowBuilder -> Kronos -> Postprocessor`).
-5.  **Evaluation Agent**: Intercepts raw predictions and applies statistical calibration based on historical accuracy.
-6.  **Signal Fusion Agent**: Unifies calibrated technical probabilities with fundamental market consensus.
-7.  **Risk Agent**: Calculates expected value and the recommended Kelly position size.
-8.  **Feedback Agent**: Updates Hermes' short-term memory and logs immutable metrics to a SQLite database.
+The core of the system is the **Agent Swarm**. When a prediction is requested, the agents execute a unified workflow without requiring human intervention.
+
+```mermaid
+graph TD
+    User([User Request]) --> Supervisor[Supervisor Agent]
+    
+    Supervisor --> DataAgent[Market Data Agent]
+    Supervisor --> IntelAgent[Market Intel Agent]
+    
+    DataAgent --> PredAgent[Prediction Agent]
+    PredAgent --> EvalAgent[Evaluation Agent]
+    
+    EvalAgent --> Fusion[Signal Fusion Agent]
+    IntelAgent --> Fusion
+    
+    Fusion --> Risk[Risk Agent]
+    Risk --> Feedback[Feedback Agent]
+    
+    Risk --> UI([Next.js Dashboard])
+    
+    classDef agent fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#f8fafc;
+    class Supervisor,DataAgent,IntelAgent,PredAgent,EvalAgent,Fusion,Risk,Feedback agent;
+```
+
+### The Agents
+
+1. **👨‍💼 Supervisor Agent**: The orchestrator. Coordinates the swarm, triggers agents in the correct order, and uses an LLM to generate an executive summary rationale for the final decision.
+2. **📈 Market Data Agent**: Collects historical multi-timeframe OHLCV data from exchanges.
+3. **🌐 Market Intelligence Agent**: Analyzes fundamental odds from decentralized prediction markets (like Polymarket/Kalshi).
+4. **🧠 Prediction Agent**: Runs technical price predictions over raw data using the Kronos Foundation model.
+5. **⚖️ Evaluation Agent**: Calibrates technical predictions using Platt Scaling to correct for model overconfidence.
+6. **🔗 Signal Fusion Agent**: Fuses calibrated technical probabilities with real-world fundamental consensus probabilities.
+7. **🛡️ Risk Agent**: Determines optimal position sizing and expected value using the Kelly Criterion.
+8. **💾 Feedback Agent**: Updates the database with execution memory to adapt to market regimes over time.
 
 ## 📂 Project Structure
 
 ```text
-app/
-├── domain/             # Core business logic and Pydantic schemas (market, prediction, risk)
-├── agents/             # Hermes-inspired worker agents (supervisor, risk, prediction, etc.)
-├── services/           # External API integrations (Binance, Apify, Polymarket, Kronos, storage)
-├── api/                # FastAPI application endpoints
-├── cli/                # Command-line interfaces
-├── config/             # Multi-profile configurations using pydantic-settings
-├── telemetry/          # Structured JSON logging and observability
-└── tests/              # Unit and integration tests
+hermes-crypto-pilot/
+├── app/                  # FastAPI Backend Logic
+│   ├── agents/           # Hermes worker agents 
+│   ├── api/              # FastAPI application endpoints
+│   ├── config/           # Multi-profile configurations using pydantic
+│   ├── domain/           # Core Pydantic schemas (market, prediction, risk)
+│   ├── services/         # External API integrations
+│   └── telemetry/        # Structured JSON logging
+│
+├── ui/                   # Next.js Frontend App
+│   ├── app/              # Next.js App Router pages
+│   ├── components/       # Shadcn UI reusable components
+│   ├── lib/              # Utility functions and API clients
+│   └── public/           # Static assets
+│
+└── main.py               # Main API entrypoint
 ```
 
 ## 🚀 Getting Started
 
-### Prerequisites
+The project comes with a built-in **Mock Mode**, allowing you to instantly run the whole system without external API keys (Binance, OpenRouter, etc.).
 
-*   Python 3.11+
-*   API Keys for OpenRouter (and optionally Binance, Apify, etc.)
+### 1. Start the Backend API
 
-### Installation
+1. Ensure you have Python 3.11+ installed.
+2. Open a terminal at the root directory and install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the FastAPI server:
+   ```bash
+   python main.py api
+   ```
+   *The API will be available at `http://localhost:8000`.*
 
-1.  Clone the repository and enter the project directory.
-2.  Install the required dependencies:
+### 2. Start the Next.js UI Dashboard
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+1. Open a new, separate terminal and navigate into the `ui` folder:
+   ```bash
+   cd ui
+   ```
+2. Install dependencies via `pnpm` (or `npm`/`yarn`):
+   ```bash
+   pnpm install
+   ```
+3. Run the development server:
+   ```bash
+   pnpm run dev
+   ```
+   *The UI will be available at `http://localhost:3000`.*
 
-3.  Set up your environment variables. You can create a `.env` file in the root directory:
+## ⚡ Using the App
 
-    ```env
-    PROFILE=development
-    OPENROUTER_API_KEY=your_openrouter_api_key
-    BINANCE_API_KEY=your_binance_api_key
-    BINANCE_API_SECRET=your_binance_api_secret
-    APIFY_API_TOKEN=your_apify_api_token
-    LOG_LEVEL=INFO
-    ```
+1. Open `http://localhost:3000` in your browser.
+2. Click the **"New Prediction"** button in the top right.
+3. Enter a crypto ticker (e.g., `BTC` or `ETH`).
+4. Click **"Run Agents"**.
+5. Watch as the modal synchronously awaits the `SupervisorAgent`'s workflow. It will automatically populate the screen with the AI's calculated Direction, Confidence interval, Target Price, and Stop Loss!
 
-### Usage (Local Testing)
+## 🧪 Testing & Validation
 
-The project includes a seamless **Mock Mode** enabled by default in `app/config/settings.py`. This means you can run the entire pipeline immediately without needing to configure any API keys!
-
-**1. Run the Backend API Server:**
-
-```bash
-python main.py api
-```
-*The API will start on `http://0.0.0.0:8000`.*
-
-**2. Run the Frontend Dashboard:**
-
-Open a separate terminal, navigate to the `frontend` folder, and start the Next.js server:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-*The interactive dashboard will be available at `http://localhost:3000`. Select an asset and click **"▶ Run Prediction"** to watch the simulated workflow generate technical probabilities, pull market odds, and calculate the Kelly position size.*
-
-**3. Running the CLI (Console Only):**
-
-```bash
-python main.py
-```
-*Executes the supervisor workflow for BTC and ETH concurrently and logs JSON telemetry to the console.*
-
-## 🧪 Testing & Backtesting
-
-The project includes a stubbed `BacktestingService` under `app/services/backtesting.py` to allow offline replay of historical bars for strategy validation without risking capital.
-
-Run the test suite using `pytest` (once implemented in the `tests/` directory):
+The backend supports extensive unit testing and offline backtesting without risking capital.
+To run tests:
 ```bash
 pytest
 ```
 
 ## 📜 License
 
-[MIT License](LICENSE)
+This project is licensed under the [MIT License](LICENSE).

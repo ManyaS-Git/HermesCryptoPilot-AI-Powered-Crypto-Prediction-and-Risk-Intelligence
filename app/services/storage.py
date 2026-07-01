@@ -1,25 +1,25 @@
 import aiosqlite
 import logging
-from typing import Optional
 from app.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
 
 class DatabaseManager:
     def __init__(self, db_url: str = None):
         # Strip sqlite+aiosqlite:/// prefix for local file path
         if db_url is None:
             db_url = settings.DATABASE_URL
-        
+
         self.db_path = db_url.replace("sqlite+aiosqlite:///", "")
-        
+
     async def init_db(self):
         """Initializes the database schema."""
         logger.info(f"Initializing database at {self.db_path}")
         async with aiosqlite.connect(self.db_path) as db:
             # Predictions Table
-            await db.execute('''
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS predictions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     asset TEXT NOT NULL,
@@ -30,10 +30,10 @@ class DatabaseManager:
                     predicted_move TEXT,
                     model_version TEXT
                 )
-            ''')
-            
+            """)
+
             # Market Odds Table
-            await db.execute('''
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS market_odds (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     asset TEXT NOT NULL,
@@ -42,10 +42,10 @@ class DatabaseManager:
                     implied_probability REAL,
                     odds REAL
                 )
-            ''')
-            
+            """)
+
             # OHLCV Table (mostly for caching/backtesting)
-            await db.execute('''
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS ohlcv (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     asset TEXT NOT NULL,
@@ -58,10 +58,10 @@ class DatabaseManager:
                     volume REAL,
                     UNIQUE(asset, timestamp, timeframe)
                 )
-            ''')
-            
+            """)
+
             # Evaluation Metrics
-            await db.execute('''
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS evaluation_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -71,10 +71,10 @@ class DatabaseManager:
                     sharpe_ratio REAL,
                     window_size INTEGER
                 )
-            ''')
-            
+            """)
+
             # Position Recommendations (Signals)
-            await db.execute('''
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS position_recommendations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -85,10 +85,10 @@ class DatabaseManager:
                     expected_value REAL,
                     rationale TEXT
                 )
-            ''')
-            
+            """)
+
             # Agent Runs (Telemetry/Audit)
-            await db.execute('''
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS agent_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -97,8 +97,8 @@ class DatabaseManager:
                     execution_time_ms REAL,
                     error_message TEXT
                 )
-            ''')
-            
+            """)
+
             await db.commit()
             logger.info("Database schema initialized successfully.")
 

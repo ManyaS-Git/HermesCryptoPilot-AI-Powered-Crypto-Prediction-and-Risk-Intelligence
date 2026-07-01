@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+
 
 class KronosPrediction(BaseModel):
     asset: str
@@ -10,11 +10,13 @@ class KronosPrediction(BaseModel):
     raw_probability: float
     model_version: str
 
+
 class CalibratedPrediction(BaseModel):
     prediction: KronosPrediction
     calibrated_probability: float
     calibration_method: str  # e.g., "platt_scaling", "isotonic"
-    
+
+
 class SignalFusionResult(BaseModel):
     asset: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)

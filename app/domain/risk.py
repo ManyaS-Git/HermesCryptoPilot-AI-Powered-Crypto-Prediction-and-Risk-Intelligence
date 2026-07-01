@@ -1,10 +1,11 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional
+
 
 class RiskParameters(BaseModel):
     kelly_fraction: float = 1.0  # Full Kelly, Half Kelly, etc.
     max_position_size: float = 0.2  # Max 20% of bankroll per trade
+
 
 class PositionRecommendation(BaseModel):
     asset: str
