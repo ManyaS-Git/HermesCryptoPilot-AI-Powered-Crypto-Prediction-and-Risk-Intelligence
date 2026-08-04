@@ -50,7 +50,7 @@ export default function PortfolioPage() {
 
   const pieData =
     portfolio?.positions.map((p) => ({
-      name: p.symbol,
+      name: p.asset,
       value: p.value,
     })) || [];
 
@@ -84,7 +84,7 @@ export default function PortfolioPage() {
             <Card className="border-border">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-muted-foreground">Total Value</p>
+                  <p className="text-sm text-muted-foreground">Total Value</p>
                   <Wallet className="w-4 h-4 text-primary" />
                 </div>
               </CardHeader>
@@ -96,7 +96,7 @@ export default function PortfolioPage() {
                   })}
                 </p>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Cash available: ${portfolio.cash_available.toLocaleString('en-US', {
+                  Cash available: ${portfolio.cash_balance.toLocaleString('en-US', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -107,8 +107,8 @@ export default function PortfolioPage() {
             <Card className="border-border">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-muted-foreground">Gain/Loss</p>
-                  {portfolio.total_gain_loss >= 0 ? (
+                  <p className="text-sm text-muted-foreground">Gain/Loss</p>
+                  {portfolio.total_pnl >= 0 ? (
                     <TrendingUp className="w-4 h-4 text-green-400" />
                   ) : (
                     <TrendingDown className="w-4 h-4 text-red-400" />
@@ -118,26 +118,26 @@ export default function PortfolioPage() {
               <CardContent>
                 <p
                   className={`text-3xl font-bold ${
-                    portfolio.total_gain_loss >= 0
+                    portfolio.total_pnl >= 0
                       ? 'text-green-400'
                       : 'text-red-400'
                   }`}
                 >
-                  {portfolio.total_gain_loss >= 0 ? '+' : ''}$
-                  {portfolio.total_gain_loss.toLocaleString('en-US', {
+                  {portfolio.total_pnl >= 0 ? '+' : ''}$
+                  {portfolio.total_pnl.toLocaleString('en-US', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
                 </p>
                 <p
                   className={`text-sm mt-2 ${
-                    portfolio.total_gain_loss_pct >= 0
+                    portfolio.total_pnl_pct >= 0
                       ? 'text-green-400'
                       : 'text-red-400'
                   }`}
                 >
-                  {portfolio.total_gain_loss_pct >= 0 ? '+' : ''}
-                  {portfolio.total_gain_loss_pct.toFixed(2)}%
+                  {portfolio.total_pnl_pct >= 0 ? '+' : ''}
+                  {portfolio.total_pnl_pct.toFixed(2)}%
                 </p>
               </CardContent>
             </Card>
@@ -268,7 +268,7 @@ export default function PortfolioPage() {
                         >
                           <td className="py-3 px-4">
                             <span className="font-semibold text-foreground">
-                              {position.symbol}
+                              {position.asset}
                             </span>
                           </td>
                           <td className="text-right py-3 px-4 text-foreground">
@@ -288,13 +288,13 @@ export default function PortfolioPage() {
                           </td>
                           <td
                             className={`text-right py-3 px-4 font-semibold ${
-                              position.gain_loss_pct >= 0
+                              position.unrealized_pnl_pct >= 0
                                 ? 'text-green-400'
                                 : 'text-red-400'
                             }`}
                           >
-                            {position.gain_loss_pct >= 0 ? '+' : ''}
-                            {position.gain_loss_pct.toFixed(2)}%
+                            {position.unrealized_pnl_pct >= 0 ? '+' : ''}
+                            {position.unrealized_pnl_pct.toFixed(2)}%
                           </td>
                         </tr>
                       ))}

@@ -53,11 +53,8 @@ export default function DashboardPage() {
     try {
       const result = await createPrediction({
         asset: newAsset.toUpperCase(),
-        direction: 'UP',
-        confidence: 0,
-        price: 0,
       });
-      setPredictionResult(result);
+      setPredictionResult(result as unknown as Prediction);
       
       const [statsData, predictionsData, agentsData] = await Promise.all([
         fetchDashboardStats(),

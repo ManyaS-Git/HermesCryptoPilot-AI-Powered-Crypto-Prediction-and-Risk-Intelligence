@@ -1,32 +1,39 @@
-from typing import List
-from app.domain.market import OHLCV
-from app.services.market_data import MarketDataService
-from app.telemetry.logger import setup_telemetry
+"""Market Data Agent: fetches real multi-timeframe OHLCV data and computes
+technical indicators and market regime from it."""
+from __future__ import annotations
 
-logger = setup_telemetry(__name__)
+from app.domain.market import Candle
+from app.services.indicators.compute import candles_to_frame, compute_all, detect_regime
+from app.services.market.manager import MarketDataManager
 
 
 class MarketDataAgent:
-    def __init__(self):
-        self.service = MarketDataService()
+    def __init__(self, market: MarketDataManager | None = None) -> None:
+        self.market = market or MarketDataManager()
 
     async def fetch_historical_data(
-        self, asset: str, timeframes: List[str] = ["1m", "5m"], limit: int = 1000
-    ) -> dict[str, List[OHLCV]]:
-        """
-        Fetches multi-timeframe OHLCV data.
-        """
-        logger.info(f"Fetching historical data for {asset} on timeframes {timeframes}")
-        data_dict = {}
-
-        # Sequentially or concurrently fetch data for different timeframes
+        self, asset: str, timeframes: list[str] | None = None, limit: int = 500
+    ) -> dict[str, list[Candle]]:
+        timeframes = timeframes or ["5m", "15m", "1h"]
+        data: dict[str, list[Candle]] = {}
         for tf in timeframes:
             try:
-                # Convert common crypto names to Binance pairs
-                pair = f"{asset}USDT" if "USDT" not in asset else asset
-                data = await self.service.fetch_ohlcv(pair, tf, limit)
-                data_dict[tf] = data
-            except Exception as e:
-                logger.error(f"Failed to fetch {tf} data for {asset}: {e}")
+                data[tf] = await self.market.get_klines(asset, tf, limit)
+            except Exception:
+                continue
+        return data
 
-        return data_dict
+    async def get_indicators(self, asset: str, interval: str = "15m", limit: int = 500) -> dict:
+        candles = await self.market.get_klines(asset, interval, limit)
+        frame = candles_to_frame(candles)
+        analysis = compute_all(frame)
+        regime = detect_regime(frame)
+        return {
+            "asset": asset.upper(),
+            "interval": interval,
+            "latest": analysis["latest"],
+            "series": analysis["series"],
+            "regime": regime,
+            "last_close": float(frame["close"].iloc[-1]) if len(frame) else None,
+            "last_timestamp": frame["timestamp"].iloc[-1].isoformat() if len(frame) else None,
+        }

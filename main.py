@@ -1,46 +1,54 @@
+"""Hermes entrypoint: `python main.py api` starts the server;
+`python main.py` runs the agent swarm from the CLI."""
 import asyncio
-import sys
+import logging
 import os
+import sys
 
-# Add the project root to the python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from app.services.storage import DatabaseManager
-from app.agents.supervisor import SupervisorAgent
-from app.telemetry.logger import setup_telemetry
 import uvicorn
 
-logger = setup_telemetry(__name__)
+logging.basicConfig(level=logging.INFO)
 
-async def init_system():
-    logger.info("Initializing system dependencies...")
-    db_manager = DatabaseManager()
-    await db_manager.init_db()
 
 async def run_cli():
-    """
-    Runs the agent pipeline from the command line.
-    """
-    await init_system()
+    from app.db.session import init_db
+    from app.agents.supervisor import SupervisorAgent
+
+    await init_db()
     supervisor = SupervisorAgent()
-    
     assets = ["BTC", "ETH"]
-    
     for asset in assets:
-        await supervisor.run_workflow(asset)
-        logger.info("-" * 40)
+        print(f"\n=== Running Hermes workflow for {asset} ===")
+        try:
+            result = await supervisor.run_workflow(asset, interval="15m")
+            rec = result.get("recommendation", {})
+            print(
+                f"  Direction: {rec.get('direction')}  "
+                f"Position: ${rec.get('suggested_position'):,.2f}  "
+                f"Risk: {rec.get('risk_level')}"
+            )
+            print(f"  Rationale: {rec.get('rationale')}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Workflow failed: {exc}")
+        print("-" * 60)
+
 
 def run_api():
-    """
-    Runs the FastAPI server.
-    """
-    logger.info("Starting FastAPI server on port 8000")
-    uvicorn.run("app.api.main:app", host="0.0.0.0", port=8000, reload=True)
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    uvicorn.run(
+        "app.api.main:app",
+        host=settings.HOST,
+        port=settings.PORT,
+        reload=settings.ENVIRONMENT == "development",
+    )
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "api":
-        # Note: In a real environment, you'd want to call init_system() before starting uvicorn,
-        # perhaps using FastAPI lifespan events.
         run_api()
     else:
         asyncio.run(run_cli())

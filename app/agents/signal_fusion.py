@@ -1,50 +1,30 @@
-from typing import Protocol
-from app.domain.prediction import CalibratedPrediction, SignalFusionResult
-from app.domain.market import UnifiedMarketConsensus
-from app.telemetry.logger import setup_telemetry
+"""Signal Fusion Agent: blends calibrated technicals, market consensus, and
+news sentiment with dynamic weights."""
+from __future__ import annotations
 
-logger = setup_telemetry(__name__)
-
-
-class FusionStrategy(Protocol):
-    def fuse(
-        self, technicals: CalibratedPrediction, consensus: UnifiedMarketConsensus
-    ) -> SignalFusionResult: ...
-
-
-class ConfidenceWeightedAverage(FusionStrategy):
-    def __init__(self, tech_weight: float = 0.6, cons_weight: float = 0.4):
-        self.tech_weight = tech_weight
-        self.cons_weight = cons_weight
-
-    def fuse(
-        self, technicals: CalibratedPrediction, consensus: UnifiedMarketConsensus
-    ) -> SignalFusionResult:
-        tech_prob = technicals.calibrated_probability
-        if technicals.prediction.predicted_move == "DOWN":
-            tech_prob = 1.0 - tech_prob  # Normalize to UP probability
-
-        cons_prob = consensus.unified_probability
-
-        # Weighted average
-        fused_prob = (tech_prob * self.tech_weight) + (cons_prob * self.cons_weight)
-
-        rationale = f"Fused using Confidence-Weighted Average (Tech: {self.tech_weight}, Cons: {self.cons_weight}). Tech prob: {tech_prob:.4f}, Cons prob: {cons_prob:.4f}."
-
-        return SignalFusionResult(
-            asset=technicals.prediction.asset,
-            fused_probability=round(fused_prob, 4),
-            fusion_strategy="Confidence-Weighted Average",
-            rationale=rationale,
-        )
+from app.domain.fusion import SignalFusionResult
+from app.domain.intel import UnifiedMarketConsensus
+from app.domain.news import SentimentResult
+from app.domain.prediction import CalibratedPrediction
+from app.services.fusion.fusion import SignalFusionEngine
 
 
 class SignalFusionAgent:
-    def __init__(self, strategy: FusionStrategy = ConfidenceWeightedAverage()):
-        self.strategy = strategy
+    def __init__(self, engine: SignalFusionEngine | None = None) -> None:
+        self.engine = engine or SignalFusionEngine()
 
     async def fuse_signals(
-        self, technicals: CalibratedPrediction, consensus: UnifiedMarketConsensus
+        self,
+        technicals: CalibratedPrediction,
+        consensus: UnifiedMarketConsensus,
+        sentiment: SentimentResult | None = None,
+        regime: dict | None = None,
+        historical_accuracy: float | None = None,
     ) -> SignalFusionResult:
-        logger.info(f"Fusing signals for {technicals.prediction.asset}")
-        return self.strategy.fuse(technicals, consensus)
+        return self.engine.fuse(
+            technicals,
+            consensus,
+            sentiment,
+            regime or {"regime": "unknown", "volatility": 0.0},
+            historical_accuracy=historical_accuracy,
+        )

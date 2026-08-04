@@ -28,11 +28,11 @@ export default function AgentsPage() {
 
   const activeCount = agents.filter((a) => a.status === 'active').length;
   const analyzingCount = agents.filter((a) => a.status === 'analyzing').length;
-  const totalAccuracy =
+  const avgLatency =
     agents.length > 0
-      ? agents.reduce((sum, a) => sum + a.accuracy, 0) / agents.length
+      ? agents.reduce((sum, a) => sum + (a.execution_time_ms || 0), 0) / agents.length
       : 0;
-  const totalPredictions = agents.reduce((sum, a) => sum + a.predictions_made, 0);
+  const totalRuns = agents.filter((a) => a.last_run).length;
 
   return (
     <div className="p-8">
@@ -71,9 +71,9 @@ export default function AgentsPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Avg Accuracy</p>
+                <p className="text-sm text-muted-foreground">Avg Latency</p>
                 <p className="text-3xl font-bold text-accent">
-                  {(totalAccuracy * 100).toFixed(1)}%
+                  {avgLatency > 0 ? `${Math.round(avgLatency)}ms` : '—'}
                 </p>
               </div>
               <TrendingUp className="w-8 h-8 text-accent/50" />
@@ -84,9 +84,9 @@ export default function AgentsPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Total Predictions</p>
+                <p className="text-sm text-muted-foreground">Total Runs</p>
                 <p className="text-3xl font-bold text-foreground">
-                  {totalPredictions}
+                  {totalRuns}
                 </p>
               </div>
               <Pause className="w-8 h-8 text-primary/50" />
@@ -134,25 +134,19 @@ export default function AgentsPage() {
                       <th className="text-center py-3 px-4 text-muted-foreground font-medium">
                         Status
                       </th>
-                      <th className="text-right py-3 px-4 text-muted-foreground font-medium">
-                        Predictions
+                      <th className="text-left py-3 px-4 text-muted-foreground font-medium">
+                        Last Asset
                       </th>
                       <th className="text-right py-3 px-4 text-muted-foreground font-medium">
-                        Accuracy
+                        Latency
                       </th>
                       <th className="text-left py-3 px-4 text-muted-foreground font-medium">
-                        Last Update
+                        Last Run
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {agents.map((agent) => {
-                      const lastUpdate = new Date(agent.last_update);
-                      const now = new Date();
-                      const minutesAgo = Math.floor(
-                        (now.getTime() - lastUpdate.getTime()) / 60000
-                      );
-
                       return (
                         <tr
                           key={agent.id}
@@ -180,14 +174,21 @@ export default function AgentsPage() {
                               {agent.status}
                             </span>
                           </td>
-                          <td className="text-right py-3 px-4 text-foreground">
-                            {agent.predictions_made}
+                          <td className="py-3 px-4 text-foreground">
+                            {agent.last_asset || '—'}
                           </td>
                           <td className="text-right py-3 px-4 text-accent font-semibold">
-                            {(agent.accuracy * 100).toFixed(1)}%
+                            {agent.execution_time_ms != null ? `${Math.round(agent.execution_time_ms)}ms` : '—'}
                           </td>
                           <td className="py-3 px-4 text-muted-foreground text-xs">
-                            {minutesAgo < 1 ? 'just now' : `${minutesAgo}m ago`}
+                            {agent.last_run
+                              ? (() => {
+                                  const minutesAgo = Math.floor(
+                                    (Date.now() - new Date(agent.last_run).getTime()) / 60000,
+                                  );
+                                  return minutesAgo < 1 ? 'just now' : `${minutesAgo}m ago`;
+                                })()
+                              : 'never'}
                           </td>
                         </tr>
                       );

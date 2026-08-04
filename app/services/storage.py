@@ -1,111 +1,39 @@
-import aiosqlite
+"""Backward-compatible storage facade.
+
+The original ``DatabaseManager`` wrote directly to aiosqlite. It now
+delegates to the SQLAlchemy engine/session layer so that existing imports
+(``from app.services.storage import DatabaseManager``) keep working while the
+application uses a real ORM + Alembic migrations underneath.
+"""
+from __future__ import annotations
+
 import logging
-from app.config.settings import get_settings
+
+from app.db.base import Base
+from app.db.session import engine, init_db
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class DatabaseManager:
-    def __init__(self, db_url: str = None):
-        # Strip sqlite+aiosqlite:/// prefix for local file path
-        if db_url is None:
-            db_url = settings.DATABASE_URL
+    def __init__(self, db_url: str | None = None) -> None:
+        if db_url is not None:
+            logger.info("db_url override provided; using default engine instead")
+        self.engine = engine
 
-        self.db_path = db_url.replace("sqlite+aiosqlite:///", "")
+    async def init_db(self) -> None:
+        await init_db()
 
-    async def init_db(self):
-        """Initializes the database schema."""
-        logger.info(f"Initializing database at {self.db_path}")
-        async with aiosqlite.connect(self.db_path) as db:
-            # Predictions Table
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS predictions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    asset TEXT NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    timeframe TEXT,
-                    raw_probability REAL,
-                    calibrated_probability REAL,
-                    predicted_move TEXT,
-                    model_version TEXT
-                )
-            """)
+    async def create_all(self) -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
-            # Market Odds Table
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS market_odds (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    asset TEXT NOT NULL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    source TEXT NOT NULL,
-                    implied_probability REAL,
-                    odds REAL
-                )
-            """)
+    async def execute_query(self, query: str, params: tuple = ()) -> list[dict]:
+        """Raw query execution for legacy callers (returns row dicts)."""
+        from sqlalchemy import text
 
-            # OHLCV Table (mostly for caching/backtesting)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS ohlcv (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    asset TEXT NOT NULL,
-                    timestamp DATETIME,
-                    timeframe TEXT,
-                    open REAL,
-                    high REAL,
-                    low REAL,
-                    close REAL,
-                    volume REAL,
-                    UNIQUE(asset, timestamp, timeframe)
-                )
-            """)
-
-            # Evaluation Metrics
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS evaluation_metrics (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    asset TEXT,
-                    brier_score REAL,
-                    accuracy REAL,
-                    sharpe_ratio REAL,
-                    window_size INTEGER
-                )
-            """)
-
-            # Position Recommendations (Signals)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS position_recommendations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    asset TEXT,
-                    signal_direction TEXT,
-                    kelly_size REAL,
-                    fused_probability REAL,
-                    expected_value REAL,
-                    rationale TEXT
-                )
-            """)
-
-            # Agent Runs (Telemetry/Audit)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS agent_runs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    agent_name TEXT,
-                    status TEXT,
-                    execution_time_ms REAL,
-                    error_message TEXT
-                )
-            """)
-
-            await db.commit()
-            logger.info("Database schema initialized successfully.")
-
-    async def execute_query(self, query: str, params: tuple = ()):
-        """Executes a query and returns the results."""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(query, params) as cursor:
-                await db.commit()
-                return await cursor.fetchall()
+        async with engine.connect() as conn:
+            result = await conn.execute(text(query), params)
+            rows = result.fetchall()
+            columns = list(result.keys())
+            return [dict(zip(columns, row)) for row in rows]

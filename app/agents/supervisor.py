@@ -1,125 +1,274 @@
-import asyncio
-import aiohttp
-from app.telemetry.logger import setup_telemetry
-from app.agents.market_intel import MarketIntelAgent
-from app.agents.data_agent import MarketDataAgent
-from app.agents.prediction_agent import PredictionAgent
-from app.agents.evaluation_agent import EvaluationAgent
-from app.agents.signal_fusion import SignalFusionAgent
-from app.agents.risk_agent import RiskAgent
-from app.agents.feedback_agent import FeedbackAgent
-from app.config.settings import get_settings
+"""Supervisor Agent: orchestrates the full agent swarm for a prediction.
 
-logger = setup_telemetry(__name__)
-settings = get_settings()
+Workflow (all real data, no mocks):
+  1. MarketDataAgent + MarketIntelAgent  (concurrent)
+  2. PredictionAgent  -> ensemble prediction
+  3. EvaluationAgent  -> calibration with outcome history
+  4. SentimentService -> news sentiment
+  5. SignalFusionAgent -> dynamic-weight fusion
+  6. RiskAgent        -> Kelly sizing + risk metrics
+  7. LLMService       -> executive rationale
+  8. FeedbackAgent    -> persist prediction + agent telemetry
+
+Each agent's execution time is recorded and persisted as an AgentRun.
+"""
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.agents.data_agent import MarketDataAgent
+from app.agents.evaluation_agent import EvaluationAgent
+from app.agents.feedback_agent import FeedbackAgent
+from app.agents.market_intel import MarketIntelAgent
+from app.agents.prediction_agent import PredictionAgent
+from app.agents.risk_agent import RiskAgent
+from app.agents.signal_fusion import SignalFusionAgent
+from app.db.repositories import AgentRunRepository, PredictionRepository
+from app.services.intelligence.sentiment import SentimentService
+from app.services.llm.service import LLMService
+from app.services.market.symbols import normalize_asset
 
 
 class SupervisorAgent:
-    def __init__(self):
-        self.market_intel = MarketIntelAgent()
+    def __init__(self) -> None:
         self.data_agent = MarketDataAgent()
+        self.intel_agent = MarketIntelAgent()
         self.prediction_agent = PredictionAgent()
         self.evaluation_agent = EvaluationAgent()
-        self.signal_fusion = SignalFusionAgent()
+        self.sentiment_service = SentimentService()
+        self.fusion_agent = SignalFusionAgent()
         self.risk_agent = RiskAgent()
         self.feedback_agent = FeedbackAgent()
+        self.llm = LLMService()
+        self.repo = PredictionRepository()
+        self.run_repo = AgentRunRepository()
 
-    async def invoke_llm(self, prompt: str) -> str:
-        """
-        Calls OpenRouter to perform LLM-based reasoning and summarization.
-        """
-        if not settings.OPENROUTER_API_KEY:
-            logger.warning(
-                "OpenRouter API Key not set. Using deterministic fallback reasoning."
-            )
-            return "Fallback LLM reasoning: The signals suggest cautious trading based on mixed market and technical indicators."
-
-        logger.info(f"Invoking LLM ({settings.LLM_MODEL}) for reasoning.")
-        headers = {
-            "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-            "HTTP-Referer": "https://github.com/nousresearch/hermes-agent",
-            "Content-Type": "application/json",
+    async def run_workflow(
+        self,
+        asset: str,
+        interval: str = "15m",
+        horizon_bars: int = 1,
+        session: AsyncSession | None = None,
+    ) -> dict[str, Any]:
+        asset = normalize_asset(asset)
+        timings: dict[str, float] = {}
+        statuses: dict[str, str] = {}
+        result: dict[str, Any] = {
+            "asset": asset,
+            "interval": interval,
+            "horizon_bars": horizon_bars,
         }
-        payload = {
-            "model": settings.LLM_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                ) as resp:
-                    data = await resp.json()
-                    return data["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error(f"LLM invocation failed: {e}")
-            return "Fallback LLM reasoning due to API failure."
 
-    async def run_workflow(self, asset: str):
-        """
-        Main orchestration loop.
-        """
-        logger.info(f"Supervisor Agent starting workflow for {asset}")
-
-        # 1. Fetch Market Intel & Historical Data concurrently
-        logger.info("Delegating to Market Intel and Data agents...")
-        consensus_task = self.market_intel.get_market_consensus(asset)
+        # --- Agent 1 & 2: data + intel (concurrent) ---
+        statuses["MarketDataAgent"] = "running"
+        statuses["MarketIntelAgent"] = "running"
+        start = time.perf_counter()
         data_task = self.data_agent.fetch_historical_data(
-            asset, timeframes=["5m"], limit=100
+            asset, timeframes=[interval, "1h"], limit=500
         )
+        intel_task = self.intel_agent.get_market_consensus(asset)
+        data_dict, intel = await _gather(data_task, intel_task)
+        timings["MarketDataAgent"] = (time.perf_counter() - start) * 1000
+        statuses["MarketDataAgent"] = "completed" if data_dict else "failed"
 
-        consensus, data_dict = await asyncio.gather(consensus_task, data_task)
+        candles = data_dict.get(interval) or data_dict.get("1h")
+        if not candles:
+            result.update(
+                status="failed",
+                error="Market data agent could not retrieve historical candles.",
+                timings=timings,
+                agent_statuses=statuses,
+            )
+            return result
+        timings["MarketIntelAgent"] = (time.perf_counter() - start) * 1000
+        statuses["MarketIntelAgent"] = "completed"
 
-        if not data_dict or "5m" not in data_dict or not data_dict["5m"]:
-            logger.error("Failed to retrieve historical data. Aborting workflow.")
-            return
+        indicators = await self.data_agent.get_indicators(asset, interval)
+        regime = indicators.get("regime", {})
 
-        # 2. Run Technical Prediction
-        logger.info("Delegating to Prediction Agent...")
-        predictions = await self.prediction_agent.run_prediction(data_dict)
-        raw_prediction = predictions.get("5m")
-        if not raw_prediction:
-            logger.error("Failed to generate prediction.")
-            return
-
-        # 3. Calibrate Prediction
-        logger.info("Delegating to Evaluation Agent for calibration...")
-        calibrated_prediction = await self.evaluation_agent.calibrate(raw_prediction)
-
-        # 4. Signal Fusion
-        logger.info("Delegating to Signal Fusion Agent...")
-        fused_signal = await self.signal_fusion.fuse_signals(
-            calibrated_prediction, consensus
+        # --- Agent 3: prediction ---
+        statuses["PredictionAgent"] = "running"
+        start = time.perf_counter()
+        history_probs, history_outcomes = await self._calibration_history(session, asset)
+        prediction = await self.prediction_agent.run_prediction(
+            asset,
+            candles,
+            interval=interval,
+            horizon_bars=horizon_bars,
+            history_probs=history_probs,
+            history_outcomes=history_outcomes,
         )
+        timings["PredictionAgent"] = (time.perf_counter() - start) * 1000
+        statuses["PredictionAgent"] = "completed"
 
-        # 5. Risk / Kelly Sizing
-        logger.info("Delegating to Risk Agent...")
-        # Assume decimal odds of 2.0 (1:1 payout) for simple binary option
-        position_rec = await self.risk_agent.calculate_kelly_size(
-            fused_signal, odds=2.0
+        # --- Agent 4: evaluation / calibration ---
+        statuses["EvaluationAgent"] = "running"
+        start = time.perf_counter()
+        calibrated = await self.evaluation_agent.calibrate(
+            prediction, history_probs, history_outcomes
         )
+        timings["EvaluationAgent"] = (time.perf_counter() - start) * 1000
+        statuses["EvaluationAgent"] = "completed"
 
-        # 6. LLM Reasoning / Reporting
-        prompt = f"""
-        Asset: {asset}
-        Market Consensus Prob: {consensus.unified_probability}
-        Kronos Technical Prob (Calibrated): {calibrated_prediction.calibrated_probability}
-        Fused Prob: {fused_signal.fused_probability}
-        Risk Recommendation: {position_rec.rationale}
-        
-        Please provide a short, executive summary explaining this trade rationale, resolving any disagreements between the technicals and the market.
-        """
-        llm_report = await self.invoke_llm(prompt)
-        logger.info(f"LLM Rationale: \n{llm_report}")
+        # --- Sentiment intelligence ---
+        statuses["SentimentAgent"] = "running"
+        start = time.perf_counter()
+        sentiment = None
+        try:
+            sentiment = await self.sentiment_service.analyze(asset)
+        except Exception:
+            sentiment = None
+        timings["SentimentAgent"] = (time.perf_counter() - start) * 1000
+        statuses["SentimentAgent"] = "completed"
 
-        # 7. Feedback / Memory Update
-        await self.feedback_agent.update_memory(
-            prediction_result=calibrated_prediction.model_dump(),
-            market_result=consensus.model_dump(),
-            final_decision=position_rec.model_dump(),
+        # --- Agent 5: signal fusion ---
+        statuses["SignalFusionAgent"] = "running"
+        start = time.perf_counter()
+        fusion = await self.fusion_agent.fuse_signals(
+            calibrated,
+            intel.consensus,
+            sentiment=sentiment,
+            regime=regime,
+            historical_accuracy=None,
         )
+        timings["SignalFusionAgent"] = (time.perf_counter() - start) * 1000
+        statuses["SignalFusionAgent"] = "completed"
 
-        logger.info(f"Supervisor Agent completed workflow for {asset}")
-        return position_rec
+        # --- Agent 6: risk / Kelly ---
+        statuses["RiskAgent"] = "running"
+        start = time.perf_counter()
+        recommendation, risk_metrics = await self.risk_agent.calculate_kelly_size(
+            fusion, candles, interval=interval
+        )
+        timings["RiskAgent"] = (time.perf_counter() - start) * 1000
+        statuses["RiskAgent"] = "completed"
+
+        # --- LLM reasoning ---
+        statuses["LLMReasoningAgent"] = "running"
+        start = time.perf_counter()
+        summary_payload = (
+            f"Asset: {asset} ({interval})\n"
+            f"Technical probability: {calibrated.calibrated_probability:.2f} ({calibrated.direction})\n"
+            f"Market consensus: {intel.consensus.consensus_probability:.2f}\n"
+            f"News sentiment: {sentiment.label if sentiment else 'n/a'} ({sentiment.score if sentiment else 0:+.2f})\n"
+            f"Fused probability: {fusion.fused_probability:.2f}\n"
+            f"Expected return: {prediction.expected_return:+.2%}\n"
+            f"Risk: VaR(95%) {risk_metrics.var_95:.2%}, max DD {risk_metrics.max_drawdown:.2%}, "
+            f"Sharpe {risk_metrics.sharpe_ratio:.2f}\n"
+            f"Recommended position: ${recommendation.suggested_position:,.2f} "
+            f"(Kelly {recommendation.kelly_size:.4f}) with stop at {recommendation.stop_loss}."
+        )
+        llm_summary = await self.llm.explain_signal(summary_payload)
+        timings["LLMReasoningAgent"] = (time.perf_counter() - start) * 1000
+        statuses["LLMReasoningAgent"] = "completed"
+
+        # --- Agent 8: feedback / memory ---
+        statuses["FeedbackAgent"] = "running"
+        start = time.perf_counter()
+        prediction_id = None
+        if session is not None:
+            prediction_id = await self.feedback_agent.store_prediction(
+                session,
+                _prediction_payload(
+                    asset, interval, horizon_bars, prediction, calibrated, fusion,
+                    recommendation, risk_metrics, sentiment, regime, llm_summary,
+                ),
+            )
+            await self._persist_runs(session, asset, statuses, timings)
+        timings["FeedbackAgent"] = (time.perf_counter() - start) * 1000
+        statuses["FeedbackAgent"] = "completed"
+
+        result.update(
+            status="completed",
+            prediction_id=prediction_id,
+            prediction=prediction.model_dump(),
+            calibrated=calibrated.model_dump(),
+            fusion=fusion.model_dump(),
+            recommendation=recommendation.model_dump(),
+            risk_metrics=risk_metrics.model_dump(),
+            sentiment=sentiment.model_dump() if sentiment else None,
+            market_intel=intel.model_dump(),
+            indicators={
+                "latest": indicators.get("latest"),
+                "regime": regime,
+                "last_close": indicators.get("last_close"),
+            },
+            llm_summary=llm_summary,
+            timings=timings,
+            agent_statuses=statuses,
+        )
+        return result
+
+    async def _calibration_history(
+        self, session: AsyncSession | None, asset: str
+    ) -> tuple[list[float], list[int]]:
+        if session is None:
+            return [], []
+        return await self.repo.calibration_history(session, asset=asset, days=45)
+
+    async def _persist_runs(
+        self, session: AsyncSession, asset: str, statuses: dict, timings: dict
+    ) -> None:
+        for name, status in statuses.items():
+            run = await self.run_repo.start(session, name, asset)
+            if status == "completed":
+                await self.run_repo.complete(
+                    session, run, timings.get(name, 0.0)
+                )
+            elif status == "failed":
+                await self.run_repo.fail(session, run, "agent failed")
+
+
+def _prediction_payload(
+    asset, interval, horizon_bars, prediction, calibrated, fusion,
+    recommendation, risk_metrics, sentiment, regime, llm_summary,
+) -> dict[str, Any]:
+    return {
+        "asset": asset,
+        "interval": interval,
+        "horizon_bars": horizon_bars,
+        "direction": prediction.direction,
+        "probability": prediction.probability,
+        "expected_return": prediction.expected_return,
+        "expected_price": prediction.expected_price,
+        "target_price": recommendation.take_profit,
+        "stop_loss": recommendation.stop_loss,
+        "confidence_lower": prediction.confidence_lower,
+        "confidence_upper": prediction.confidence_upper,
+        "model_ensemble": ",".join(sorted(prediction.model_weights.keys())),
+        "signal_direction": recommendation.direction,
+        "kelly_size": recommendation.kelly_size,
+        "expected_value": recommendation.expected_value,
+        "risk_score": recommendation.risk_score,
+        "var_95": risk_metrics.var_95,
+        "sharpe_ratio": risk_metrics.sharpe_ratio,
+        "sortino_ratio": risk_metrics.sortino_ratio,
+        "max_drawdown": risk_metrics.max_drawdown,
+        "fused_probability": fusion.fused_probability,
+        "fusion_weights": fusion.weights,
+        "technical_probability": calibrated.calibrated_probability,
+        "consensus_probability": fusion.consensus_probability,
+        "sentiment_score": sentiment.score if sentiment else None,
+        "market_regime": regime.get("regime", "unknown"),
+        "model_predictions": [m.model_dump() for m in prediction.model_predictions],
+        "indicators": {},
+        "rationale": recommendation.rationale,
+        "llm_summary": llm_summary,
+        "status": "completed",
+    }
+
+
+async def _gather(*tasks):
+    import asyncio
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    out = []
+    for r in results:
+        if isinstance(r, Exception):
+            out.append(None)
+        else:
+            out.append(r)
+    return out

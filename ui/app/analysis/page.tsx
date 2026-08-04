@@ -10,11 +10,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { fetchMarketAnalysis } from '@/lib/api';
-import { MarketAnalysis } from '@/lib/types';
+import { fetchMarketAnalysis, fetchKlines } from '@/lib/api';
+import { MarketAnalysis, Candle } from '@/lib/types';
 import {
-  BarChart,
-  Bar,
   LineChart,
   Line,
   XAxis,
@@ -22,11 +20,8 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Radar,
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
+  AreaChart,
+  Area,
 } from 'recharts';
 import { TrendingUp, Gauge, AlertCircle, CheckCircle } from 'lucide-react';
 
@@ -35,16 +30,21 @@ const SYMBOLS = ['BTC', 'ETH', 'SOL', 'XRP', 'ADA'];
 export default function AnalysisPage() {
   const [selectedSymbol, setSelectedSymbol] = useState('BTC');
   const [analysis, setAnalysis] = useState<MarketAnalysis | null>(null);
+  const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const loadAnalysis = async () => {
       setLoading(true);
       try {
-        const data = await fetchMarketAnalysis(selectedSymbol);
+        const [data, klines] = await Promise.all([
+          fetchMarketAnalysis(selectedSymbol),
+          fetchKlines(selectedSymbol, '1h', 168).catch(() => []),
+        ]);
         setAnalysis(data);
+        setCandles(klines);
       } catch (error) {
-        console.error('[v0] Error loading analysis:', error);
+        console.error('[Hermes] Error loading analysis:', error);
       } finally {
         setLoading(false);
       }
@@ -52,33 +52,18 @@ export default function AnalysisPage() {
     loadAnalysis();
   }, [selectedSymbol]);
 
-  const chartData = [
-    { name: 'Technical', value: 75 },
-    { name: 'Sentiment', value: 65 },
-    { name: 'Volume', value: 80 },
-    { name: 'Momentum', value: 70 },
-    { name: 'Trend', value: 85 },
-  ];
+  const priceData = candles.map((c) => ({
+    time: new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    price: c.close,
+    volume: c.volume,
+  }));
 
-  const priceData = [
-    { time: '00:00', price: 43200 },
-    { time: '04:00', price: 43500 },
-    { time: '08:00', price: 42800 },
-    { time: '12:00', price: 44100 },
-    { time: '16:00', price: 43900 },
-    { time: '20:00', price: 44500 },
-    { time: '24:00', price: 45200 },
-  ];
-
-  const volatilityData = [
-    { time: 'Mon', vol: 2.1 },
-    { time: 'Tue', vol: 2.3 },
-    { time: 'Wed', vol: 1.9 },
-    { time: 'Thu', vol: 2.5 },
-    { time: 'Fri', vol: 2.2 },
-    { time: 'Sat', vol: 2.8 },
-    { time: 'Sun', vol: 2.4 },
-  ];
+  const indicatorData = analysis
+    ? Object.entries(analysis.indicators).map(([name, value]) => ({
+        name: name.replace('_', ' '),
+        value: Math.round((value as number) * 100),
+      }))
+    : [];
 
   return (
     <div className="p-8">
@@ -121,7 +106,7 @@ export default function AnalysisPage() {
               <CardContent className="pt-6">
                 <p className="text-sm text-muted-foreground mb-2">Current Price</p>
                 <p className="text-3xl font-bold text-foreground">
-                  ${analysis.current_price.toFixed(2)}
+                  ${analysis.current_price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </CardContent>
             </Card>
@@ -164,68 +149,21 @@ export default function AnalysisPage() {
           {/* Price Chart */}
           <Card className="border-border">
             <CardHeader>
-              <CardTitle>Price Movement (24h)</CardTitle>
+              <CardTitle>Price Movement ({selectedSymbol}/USDT)</CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={priceData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2d2d2d" />
-                  <XAxis dataKey="time" stroke="#6b7280" />
-                  <YAxis stroke="#6b7280" />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: '#1a1a1a',
-                      border: '1px solid #2d2d2d',
-                      borderRadius: '0.5rem',
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="price"
-                    stroke="#8b5cf6"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          {/* Analysis Radar */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Technical Analysis</CardTitle>
-              </CardHeader>
-              <CardContent>
+              {priceData.length > 0 ? (
                 <ResponsiveContainer width="100%" height={300}>
-                  <RadarChart data={chartData}>
-                    <PolarGrid stroke="#2d2d2d" />
-                    <PolarAngleAxis dataKey="name" stroke="#6b7280" />
-                    <PolarRadiusAxis stroke="#6b7280" />
-                    <Radar
-                      name="Analysis"
-                      dataKey="value"
-                      stroke="#8b5cf6"
-                      fill="#8b5cf6"
-                      fillOpacity={0.3}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            {/* Volatility */}
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle>Weekly Volatility</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={volatilityData}>
+                  <AreaChart data={priceData}>
+                    <defs>
+                      <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#2d2d2d" />
-                    <XAxis dataKey="time" stroke="#6b7280" />
-                    <YAxis stroke="#6b7280" />
+                    <XAxis dataKey="time" stroke="#6b7280" tick={{ fontSize: 11 }} />
+                    <YAxis stroke="#6b7280" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
                     <Tooltip
                       contentStyle={{
                         backgroundColor: '#1a1a1a',
@@ -233,46 +171,86 @@ export default function AnalysisPage() {
                         borderRadius: '0.5rem',
                       }}
                     />
-                    <Bar dataKey="vol" fill="#06b6d4" radius={[8, 8, 0, 0]} />
-                  </BarChart>
+                    <Area
+                      type="monotone"
+                      dataKey="price"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      fill="url(#priceGradient)"
+                    />
+                  </AreaChart>
                 </ResponsiveContainer>
+              ) : (
+                <div className="h-64 flex items-center justify-center text-muted-foreground">
+                  No price data available
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Indicator Radar */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Signals */}
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle>Technical Signals</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="p-4 bg-card rounded-lg border border-border">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Gauge className="w-5 h-5 text-primary" />
+                      <p className="font-semibold text-foreground">Current Signal</p>
+                    </div>
+                    <p className="text-lg text-accent">{analysis.technical_signal}</p>
+                  </div>
+                  <div className="p-4 bg-card rounded-lg border border-border">
+                    <div className="flex items-center gap-2 mb-2">
+                      <TrendingUp className="w-5 h-5 text-primary" />
+                      <p className="font-semibold text-foreground">Trend Direction</p>
+                    </div>
+                    <p className="text-lg capitalize text-primary">{analysis.trend}</p>
+                  </div>
+                  <div className="p-4 bg-card rounded-lg border border-border">
+                    <div className="flex items-center gap-2 mb-2">
+                      <CheckCircle className="w-5 h-5 text-primary" />
+                      <p className="font-semibold text-foreground">Regime</p>
+                    </div>
+                    <p className="text-lg text-accent capitalize">{analysis.regime.replace('_', ' ')}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Indicator Bars */}
+            <Card className="border-border">
+              <CardHeader>
+                <CardTitle>Indicator Scores</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {indicatorData.length > 0 ? (
+                  <div className="space-y-3">
+                    {indicatorData.map((item) => (
+                      <div key={item.name} className="flex items-center gap-3">
+                        <span className="w-28 text-sm text-muted-foreground capitalize">{item.name}</span>
+                        <div className="flex-1 bg-border rounded-full h-3">
+                          <div
+                            className="bg-primary h-3 rounded-full transition-all"
+                            style={{ width: `${Math.min(100, Math.max(0, item.value))}%` }}
+                          />
+                        </div>
+                        <span className="w-12 text-right text-sm font-medium text-foreground">{item.value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">
+                    No indicator data
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
-
-          {/* Signals */}
-          <Card className="border-border">
-            <CardHeader>
-              <CardTitle>Technical Signals</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-4 bg-card rounded-lg border border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Gauge className="w-5 h-5 text-primary" />
-                    <p className="font-semibold text-foreground">Current Signal</p>
-                  </div>
-                  <p className="text-lg text-accent">{analysis.technical_signal}</p>
-                </div>
-                <div className="p-4 bg-card rounded-lg border border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-5 h-5 text-primary" />
-                    <p className="font-semibold text-foreground">Trend Direction</p>
-                  </div>
-                  <p className="text-lg capitalize text-primary">{analysis.trend}</p>
-                </div>
-                <div className="p-4 bg-card rounded-lg border border-border">
-                  <div className="flex items-center gap-2 mb-2">
-                    <CheckCircle className="w-5 h-5 text-primary" />
-                    <p className="font-semibold text-foreground">Confidence</p>
-                  </div>
-                  <p className="text-lg text-accent">
-                    {(analysis.sentiment_score * 100).toFixed(0)}%
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       ) : (
         <div className="text-center py-16 bg-card rounded-lg border border-border">
